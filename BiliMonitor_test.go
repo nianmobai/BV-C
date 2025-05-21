@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestGetDetail(t *testing.T) {
+	bvid := "BV1PT4y1p75Z"
+	result, err := getVideoDetail(bvid)
+	if err != nil {
+		t.Log("err", err.Error())
+	}
+	t.Log("播放量", result.Views)
+	t.Log("投币", result.Coins)
+	t.Log("点赞", result.Likes)
+	t.Log("回复数", result.Reply)
+}
 func TestGetBvid3And4(t *testing.T) {
 	bvid3, bvid4, er := GetBvid3And4()
 	if er != nil {
