@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"io"
@@ -20,183 +19,189 @@ import (
 	"time"
 )
 
-type BVLIST struct {
-	mid     uint `gorm:"primaryKey"` //主键
-	aid     uint
-	bvid    string `gorm:"uniqueIndex"` //唯一索引
-	ctime   uint   //创建时间
-	pubdate uint   //发布时间
-	title   string //标题
+type BvList struct {
+	Mid     uint
+	Aid     int64
+	Bvid    string `gorm:"type:varchar(255);primaryKey"` //主键
+	Ctime   int64  //创建时间
+	Pubdate int64  //发布时间
+	Title   string //标题
+	UpName  string
 }
-type UP struct {
-	mid  uint   `gorm:"uniqueIndex"` //唯一索引
-	name string `gorm:"size:100;not null"`
-	fans int    `gorm:"not null"`
+type UpInfo struct {
+	Mid  uint `gorm:"primaryKey"` //主键
+	Name string
 }
 
 type VideoStat struct {
-	bvid     string    `gorm:"size:12;primaryKey"` // BV号
-	StatTime time.Time `gorm:"primaryKey;index"`   // 统计时间
-	Views    int       // 播放量
-	Likes    int       // 点赞数
-	Coins    int       // 硬币数
-	Reply    int       //回复
+	Bvid     string // BV号
+	StatTime int64  // 统计时间
+	Views    int    // 播放量
+	Likes    int    // 点赞数
+	Coins    int    // 硬币数
+	Reply    int    //回复
+	Online   int64  //在线观看人数
 }
 
-var tableName = "biliMoniter"
-var usrName = "root"
-var psd = "Nianmobai123/"
-var protocol = "tcp"
-var addr = "121.40.170.27:3360"
+var usrName = "bili"
+var psd = "ttlIEEE"
+var addr = "localhost:3306"
 var dbName = "biliMonitor"
 var dsnRaw = "username:password@protocol(address)/dbname?charset=utf8&parseTime=True"
 
-func updateBVStat(list *[]BVLIST, db gorm.DB) error {
+// 从数据库中获取视频的简要信息
+func getVideoInfo(bv string, db *gorm.DB) (BvList, error) {
+	var result BvList
+	err := db.Where("bvid = ?", bv).First(&result).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return result, errors.New("not found")
+	}
+	return result, nil
+}
+
+// 全局更新数据
+func globalUpdate() {
+	var dsn = dsnRaw
+	dsn = strings.Replace(dsn, "username", usrName, -1)
+	dsn = strings.Replace(dsn, "password", psd, -1)
+	dsn = strings.Replace(dsn, "protocol", "tcp", -1)
+	dsn = strings.Replace(dsn, "address", addr, -1)
+	dsn = strings.Replace(dsn, "dbname", dbName, -1)
+	db, _ := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	up, _ := getUPList(db)
+	updateBvlist(&up, db)
+	bvlist, _ := getAllBV(db)
+	updateBVStat(&bvlist, db)
+}
+
+// 删除视频
+func delBv(list *[]string, db *gorm.DB) {
+	var bvlist []BvList
+	for _, item := range *list {
+		bvlist = append(bvlist, BvList{
+			Bvid: item,
+		})
+	}
+	db.Delete(&bvlist)
+}
+
+// 删除Up主
+func delUp(list *[]uint, db *gorm.DB) {
+	var uplist []UpInfo
+	for _, item := range *list {
+		uplist = append(uplist, UpInfo{
+			Mid: item,
+		})
+	}
+	db.Delete(&uplist)
+}
+
+// 从数据库统计视频状态信息，返回的信息按时间升序排列
+func getVideoStats(bv string, db *gorm.DB) []VideoStat {
+	var result []VideoStat
+	db.Where("bvid = ?", bv).Order("stat_time").Find(&result)
+	return result
+}
+
+// 更新视频列表
+func updateBvlist(list *[]UpInfo, db *gorm.DB) {
+	var result []BvList
+	for _, item := range *list {
+		BvItem, _ := crawBiliUserVideoList(item.Mid, 1, 10)
+		for _, bvList := range BvItem {
+			bvList.UpName = item.Name
+		}
+		result = append(result, BvItem...)
+	}
+	db.Save(&result)
+}
+
+// 更新视频信息
+func updateBVStat(list *[]BvList, db *gorm.DB) {
 	var result []VideoStat
 	for _, item := range *list {
 		//根据BV号获取视频信息存入数据库当中
-		info, err := getVideoDetail(item.bvid)
+		stat, _, err := crawVideoDetail(item.Bvid)
 		if err != nil {
 			continue
 		}
-		result = append(result, info)
+		result = append(result, stat)
+		time.Sleep(1 * time.Second)
 	}
-	err := db.Create(&result)
-	if err != nil {
-		return err.Error
-	}
-	return nil
+	db.Save(&result)
 }
 
-// 获取视频当前时刻的信息
-func getVideoDetail(bv string) (VideoStat, error) {
+// 爬取视频当前时刻的信息
+func crawVideoDetail(bv string) (VideoStat, BvList, error) {
 	result := VideoStat{}
+	info := BvList{}
 	baseUrl := "https://api.bilibili.com/x/web-interface/view?bvid=bvReplace"
-	url := strings.Replace(baseUrl, "bvReplace", bv, -1)
-	req, err := http.NewRequest("GET", url, nil)
+	baseUrl = strings.Replace(baseUrl, "bvReplace", bv, -1)
+	req, err := http.NewRequest("GET", baseUrl, nil)
 	if err != nil {
-		return result, err
+		return result, info, err
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36")
 	client := &http.Client{}
 	resp, errR := client.Do(req)
 	if errR != nil {
-		return result, errR
+		return result, info, errR
 	}
 	defer resp.Body.Close()
 	rawRes, _ := io.ReadAll(resp.Body)
 	var data map[string]interface{}
 	json.Unmarshal(rawRes, &data)
 	if data["code"].(float64) != 0 {
-		return result, errors.New("response error")
+		return result, info, errors.New("get info:response error")
 	}
-	result.bvid = bv                                                                                             //BV号
-	result.StatTime = time.Now()                                                                                 //时刻
-	result.Views = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["view"].(float64)) //播放量
-	result.Likes = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["like"].(float64)) //点赞数
-	result.Coins = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["coin"].(float64)) //投币数
-	result.Reply = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["reply"].(float64))
-	return result, nil
-}
+	result.Bvid = bv                                                                                              //BV号
+	result.StatTime = time.Now().Unix()                                                                           //时刻
+	result.Views = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["view"].(float64))  //播放量
+	result.Likes = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["like"].(float64))  //点赞数
+	result.Coins = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["coin"].(float64))  //投币数
+	result.Reply = int(data["data"].(map[string]interface{})["stat"].(map[string]interface{})["reply"].(float64)) //回复量
 
-// 将BV号保存至数据库
-func updataBV(list *[]BVLIST, db gorm.DB) error {
-	Werr := db.Save(list).Error
-	if Werr != nil {
-		return Werr
+	cid := int64(data["data"].(map[string]interface{})["cid"].(float64))
+	onlineUrl := "https://api.bilibili.com/x/player/online/total?bvid={BVID}&cid={CID}"
+	onlineUrl = strings.Replace(onlineUrl, "{BVID}", bv, -1)
+	onlineUrl = strings.Replace(onlineUrl, "{CID}", strconv.FormatInt(cid, 10), -1)
+	reqOnline, errOnline := http.NewRequest("GET", onlineUrl, nil)
+	if errOnline != nil {
+		return result, info, errOnline
 	}
-	return nil
-}
+	reqOnline.Header.Set("Content-Type", "application/json; charset=utf-8")
+	reqOnline.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36")
+	respOnline, errOnline := client.Do(reqOnline)
+	if errOnline != nil {
+		return result, info, errOnline
+	}
+	defer respOnline.Body.Close()
+	rawResOnline, _ := io.ReadAll(respOnline.Body)
+	var total map[string]interface{}
+	json.Unmarshal(rawResOnline, &total)
+	if total["code"].(float64) != 0 {
+		return result, info, errors.New("get total:response error")
+	}
+	result.Online, _ = strconv.ParseInt(total["data"].(map[string]interface{})["count"].(string), 10, 64)
 
-// 从数据库获取BV表
-func getBV(list *[]UP, db gorm.DB) ([]BVLIST, error) {
-	var Bvlist []BVLIST
-	db.Find(&Bvlist)
-	return Bvlist, nil
-}
+	info.UpName = data["data"].(map[string]interface{})["owner"].(map[string]interface{})["name"].(string)
+	info.Mid = uint(data["data"].(map[string]interface{})["owner"].(map[string]interface{})["mid"].(float64))
+	info.Bvid = result.Bvid
+	info.Title = data["data"].(map[string]interface{})["title"].(string)
+	info.Pubdate = int64(data["data"].(map[string]interface{})["pubdate"].(float64))
+	info.Ctime = int64(data["data"].(map[string]interface{})["ctime"].(float64))
+	info.Aid = int64(data["data"].(map[string]interface{})["aid"].(float64))
 
-// 从数据库获取UP表
-func getUPList(db gorm.DB) ([]UP, error) {
-	var list []UP
-	db.Find(&list)
-	return list, nil
-}
-
-// 保存UP至数据库
-func updateUPList(list *[]UP, db gorm.DB) error {
-	Werr := db.Save(list).Error
-	if Werr != nil {
-		return Werr
-	}
-	return nil
-}
-
-// 检查数据库是否存在
-func checkEnviroment() (bool, error) {
-	var count int64
-	var dsn = dsnRaw
-	dsn = strings.Replace(dsn, "username", usrName, -1)
-	dsn = strings.Replace(dsn, "password", psd, -1)
-	dsn = strings.Replace(dsn, "protocol", protocol, -1)
-	dsn = strings.Replace(dsn, "address", addr, -1)
-	dsn = strings.Replace(dsn, "dbname", "", -1)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		return false, err
-	}
-	errCheck := db.Raw("select count(*) FROM information_schema.schemata WHERE schema_name = " + tableName).Scan(&count).Error
-	if errCheck != nil {
-		return false, errCheck
-	}
-	return count > 0, nil
-}
-
-// 初始化数据库,只在初始化时调用
-func initDB() error {
-	var dsn = dsnRaw
-	strings.Replace(dsn, "username", usrName, -1)
-	strings.Replace(dsn, "password", psd, -1)
-	strings.Replace(dsn, "protocol", "tcp", -1)
-	strings.Replace(dsn, "address", addr, -1)
-	strings.Replace(dsn, "dbname", "", -1)
-	dbwithOutDB, errwithOutDB := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if errwithOutDB != nil {
-		return errwithOutDB
-	}
-	errCreateDB := dbwithOutDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", dbName)).Error
-	if errCreateDB != nil {
-		return errCreateDB
-	}
-	dsn = dsnRaw
-	strings.Replace(dsn, "username", usrName, -1)
-	strings.Replace(dsn, "password", psd, -1)
-	strings.Replace(dsn, "protocol", "tcp", -1)
-	strings.Replace(dsn, "address", addr, -1)
-	strings.Replace(dsn, "dbname", dbName, -1)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		return err
-	}
-	log.Println(db.Migrator().CurrentDatabase()) //输出现在数据库
-	if errCreateTbU := db.Migrator().CreateTable(&UP{}); errCreateTbU != nil {
-		return errCreateTbU
-	} //创建UP表
-	if errCreateTbV := db.Table("Video").Create(&BVLIST{}); errCreateTbV != nil {
-		return errCreateTbV.Error
-	} //创建Video表
-	if errCreateTbC := db.Table("VideoStat").Create(&VideoStat{}); errCreateTbC != nil {
-		return errCreateTbC.Error
-	} //创建数据统计表
-	return nil
+	return result, info, nil
 }
 
 // 获取UP视频信息
-func getBiliUserVideoList(mid string, pn int, ps int) ([]BVLIST, error) {
+func crawBiliUserVideoList(mid uint, pn int, ps int) ([]BvList, error) {
 	baseUrl := "https://api.bilibili.com/x/series/recArchivesByKeywords"
 	u, _ := url.Parse(baseUrl)
 	postData := u.Query()
-	postData.Add("mid", mid)
+	postData.Add("mid", strconv.FormatUint(uint64(mid), 10))
 	postData.Add("pn", strconv.Itoa(pn))
 	postData.Add("ps", strconv.Itoa(ps))
 	postData.Add("orderby", "pubdate")
@@ -221,18 +226,70 @@ func getBiliUserVideoList(mid string, pn int, ps int) ([]BVLIST, error) {
 		return nil, errors.New("upate list error")
 	}
 	list := responseSave["data"].(map[string]interface{})["archives"].([]interface{})
-	var videolist = make([]BVLIST, len(list))
+	var videolist = make([]BvList, len(list))
 	for i := 0; i < len(list); i++ {
-		videolist[i].aid = uint(list[i].(map[string]interface{})["aid"].(float64))
-		videolist[i].bvid = list[i].(map[string]interface{})["bvid"].(string)
-		videolist[i].ctime = uint(list[i].(map[string]interface{})["ctime"].(float64))
-		videolist[i].pubdate = uint(list[i].(map[string]interface{})["pubdate"].(float64))
-		videolist[i].title = list[i].(map[string]interface{})["title"].(string)
+		videolist[i].Mid = mid
+		videolist[i].Aid = int64(list[i].(map[string]interface{})["aid"].(float64))
+		videolist[i].Bvid = list[i].(map[string]interface{})["bvid"].(string)
+		videolist[i].Ctime = int64(list[i].(map[string]interface{})["ctime"].(float64))
+		videolist[i].Pubdate = int64(list[i].(map[string]interface{})["pubdate"].(float64))
+		videolist[i].Title = list[i].(map[string]interface{})["title"].(string)
+		videolist[i].UpName = "unknown"
 	}
 	return videolist, nil
 }
 
-// 获取鉴权信息,不需要
+// 将BV号保存至数据库
+func saveBV(list *[]BvList, db *gorm.DB) error {
+	Werr := db.Save(list).Error
+	if Werr != nil {
+		return Werr
+	}
+	return nil
+}
+
+// 从数据库获取BV表
+func getAllBV(db *gorm.DB) ([]BvList, error) {
+	var Bvlist []BvList
+	db.Find(&Bvlist)
+	return Bvlist, nil
+}
+
+// 从数据库获取UP表
+func getUPList(db *gorm.DB) ([]UpInfo, error) {
+	var list []UpInfo
+	db.Find(&list)
+	return list, nil
+}
+
+// 保存UP至数据库
+func saveUPList(list *[]UpInfo, db *gorm.DB) error {
+	Werr := db.Save(list).Error
+	if Werr != nil {
+		return Werr
+	}
+	return nil
+}
+
+// 初始化数据库,只在初始化时调用
+func initDB() error {
+	var dsn = dsnRaw
+	dsn = strings.Replace(dsn, "username", usrName, -1)
+	dsn = strings.Replace(dsn, "password", psd, -1)
+	dsn = strings.Replace(dsn, "protocol", "tcp", -1)
+	dsn = strings.Replace(dsn, "address", addr, -1)
+	dsn = strings.Replace(dsn, "dbname", dbName, -1)
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		return err
+	}
+	db.Migrator().CreateTable(&UpInfo{})
+	db.Migrator().CreateTable(&BvList{})
+	db.Migrator().CreateTable(&VideoStat{})
+	return nil
+}
+
+// 获取鉴权信息
 func mixinKeyGet(imgUrl string, subUrl string, postData url.Values) {
 	MIXIN_KEY_ENC_TAB := [...]uint8{46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
 		33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
