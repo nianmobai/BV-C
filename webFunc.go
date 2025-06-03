@@ -24,7 +24,7 @@ type Bv struct {
 // 更新请求
 func updateInfoHandle(w http.ResponseWriter, r *http.Request) {
 	var dsn = dsnRaw
-	var data map[string]interface{}
+	data := make(map[string]interface{})
 
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
@@ -46,6 +46,9 @@ func updateInfoHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		if opt == "global" {
 			globalUpdate()
+			w.WriteHeader(http.StatusOK)
+			data["code"] = 200
+			data["message"] = "success"
 		} else if opt == "vi" {
 			list, _ := getAllBV(db)
 			updateBVStat(&list, db)
@@ -104,13 +107,15 @@ func addUPHandel(w http.ResponseWriter, r *http.Request) {
 		dsn = strings.Replace(dsn, "address", addr, -1)
 		dsn = strings.Replace(dsn, "dbname", dbName, -1)
 		db, _ := gorm.Open(mysql.Open(dsn), &gorm.Config{}) //打开数据库
-		dbD = append(dbD, UpInfo{Mid: mid, Name: "valid"})
+		info, _ := crawUpInfo(mid)
+		dbD = append(dbD, UpInfo{Mid: mid, Name: info.Name})
 		errS := saveUPList(&dbD, db)
 		if errS != nil {
 			http.Error(w, errS.Error(), http.StatusBadRequest)
 		}
 		w.WriteHeader(http.StatusOK)
 		data["code"] = 200
+		data["data"] = make(map[string]interface{})
 		data["data"].(map[string]interface{})["up_list"], _ = getUPList(db)
 		data["message"] = "success"
 	} else {
@@ -165,8 +170,9 @@ func addVideoHandle(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusOK)
 		data["code"] = 200
-		data["data"].(map[string]interface{})["mid"] = ele.Mid
 		data["message"] = "success"
+		data["data"] = make(map[string]interface{})
+		data["data"].(map[string]interface{})["mid"] = ele.Mid
 		data["data"].(map[string]interface{})["ctime"] = ele.Ctime
 		data["data"].(map[string]interface{})["pubdate"] = ele.Pubdate
 		data["data"].(map[string]interface{})["title"] = ele.Title
@@ -180,12 +186,13 @@ func addVideoHandle(w http.ResponseWriter, r *http.Request) {
 
 // 获取请求
 func getVideoDataHandle(w http.ResponseWriter, r *http.Request) {
-	var data map[string]interface{}
+	data := make(map[string]interface{})
 	var dsn = dsnRaw
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Add("Access-Control-Allow-Methods", "GET")
 	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method == "GET" {
 		dsn = strings.Replace(dsn, "username", usrName, -1)
 		dsn = strings.Replace(dsn, "password", psd, -1)
@@ -197,17 +204,19 @@ func getVideoDataHandle(w http.ResponseWriter, r *http.Request) {
 		timeOrder := r.URL.Query().Get("Timeorder")
 		if bv == "" {
 			w.WriteHeader(200)
+			//data = map[string]interface{}{"data": nil, "code": 200, "message": "can't find parameter:bv"}
+			data["data"] = nil
 			data["code"] = 200
 			data["message"] = "can't find parameter:bv"
-			data["data"] = nil
 			goto end
 		}
 		VideoInfo, errI := getVideoInfo(bv, db)
 		if errI != nil {
 			w.WriteHeader(200)
+			//data = map[string]interface{}{"code": 200, "data": nil, "message": "video not exist"}
+			data["data"] = nil
 			data["code"] = 200
 			data["message"] = "video not exist"
-			data["data"] = nil
 			goto end
 		}
 		if timeOrder == "" {
@@ -217,9 +226,10 @@ func getVideoDataHandle(w http.ResponseWriter, r *http.Request) {
 		if timeOrder == "1" {
 			slices.Reverse(VideoStatList)
 		}
-		w.WriteHeader(0)
-		data["code"] = 0
+		w.WriteHeader(200)
+		data["code"] = 200
 		data["message"] = "success"
+		data["data"] = make(map[string]interface{})
 		data["data"].(map[string]interface{})["order"] = timeOrder
 		data["data"].(map[string]interface{})["video_stats"] = VideoStatList
 		data["data"].(map[string]interface{})["bv"] = VideoInfo.Bvid
@@ -235,7 +245,7 @@ end: //写入JSON数据
 }
 
 func getUpListHandel(w http.ResponseWriter, r *http.Request) {
-	var data map[string]interface{}
+	data := make(map[string]interface{})
 	var dsn = dsnRaw
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
@@ -266,7 +276,7 @@ func getUpListHandel(w http.ResponseWriter, r *http.Request) {
 
 // 删除请求
 func deleteUpHandel(w http.ResponseWriter, r *http.Request) {
-	var data map[string]interface{}
+	data := make(map[string]interface{})
 	var dsn = dsnRaw
 	var quest Up
 	w.Header().Add("Access-Control-Allow-Origin", "*")
@@ -317,8 +327,7 @@ func deleteUpHandel(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteVideoHandel(w http.ResponseWriter, r *http.Request) {
-	//TODO 删除追踪视频请求
-	var data map[string]interface{}
+	data := make(map[string]interface{})
 	var dsn = dsnRaw
 	var quest Bv
 	w.Header().Add("Access-Control-Allow-Origin", "*")

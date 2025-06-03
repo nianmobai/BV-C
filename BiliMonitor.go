@@ -108,8 +108,8 @@ func updateBvlist(list *[]UpInfo, db *gorm.DB) {
 	var result []BvList
 	for _, item := range *list {
 		BvItem, _ := crawBiliUserVideoList(item.Mid, 1, 10)
-		for _, bvList := range BvItem {
-			bvList.UpName = item.Name
+		for i := 0; i < len(BvItem); i++ {
+			BvItem[i].UpName = item.Name
 		}
 		result = append(result, BvItem...)
 	}
@@ -237,6 +237,38 @@ func crawBiliUserVideoList(mid uint, pn int, ps int) ([]BvList, error) {
 		videolist[i].UpName = "unknown"
 	}
 	return videolist, nil
+}
+
+func crawUpInfo(mid uint) (UpInfo, error) {
+	baseUrl := "https://api.bilibili.com/x/web-interface/card"
+	var result UpInfo
+	u, _ := url.Parse(baseUrl)
+	postData := u.Query()
+	postData.Add("mid", strconv.FormatUint(uint64(mid), 10))
+	postData.Add("photo", "false")
+	u.RawQuery = postData.Encode()
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return result, err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36")
+	client := http.Client{}
+	resp, errResp := client.Do(req)
+	if errResp != nil {
+		return result, errResp
+	}
+	defer resp.Body.Close()
+
+	re, _ := io.ReadAll(resp.Body)
+	responseSave := make(map[string]interface{})
+	json.Unmarshal(re, &responseSave)
+	if responseSave["code"].(float64) != 0 {
+		return result, errors.New(responseSave["message"].(string))
+	}
+	result.Mid = mid
+	result.Name = responseSave["data"].(map[string]interface{})["card"].(map[string]interface{})["name"].(string)
+	return result, nil
 }
 
 // 将BV号保存至数据库
