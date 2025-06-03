@@ -21,13 +21,12 @@ func main() {
 	http.HandleFunc("/operate/add/video", addVideoHandle)
 	//删除某一追踪项
 	http.HandleFunc("/operate/delete/up", deleteUpHandel)
-	http.HandleFunc("/operate/delete/up", deleteVideoHandel)
+	http.HandleFunc("/operate/delete/video", deleteVideoHandel)
 	//更新信息
 	http.HandleFunc("/operate/updateInfo", updateInfoHandle)
 
 	log.Println("start http server on port ", port)
-	err := http.ListenAndServe(":"+strconv.Itoa(port), nil)
-	if err != nil {
-		log.Println(err)
-	} //服务异常退出
+	if err := http.ListenAndServe(":"+strconv.Itoa(port), nil); err != nil {
+		log.Fatalf("Server failed: %v", err) // 打印错误并退出
+	}
 }
