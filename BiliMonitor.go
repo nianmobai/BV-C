@@ -45,9 +45,9 @@ type VideoStat struct {
 
 var usrName = "bili"
 var psd = "ttlIEEE"
-var addr = "localhost:3306"
+var addr = "121.40.170.27:3306"
 var dbName = "biliMonitor"
-var dsnRaw = "username:password@protocol(address)/dbname?charset=utf8&parseTime=True"
+var dsnRaw = "username:password@protocol(address)/dbname?charset=utf8mb4&parseTime=True"
 
 // 从数据库中获取视频的简要信息
 func getVideoInfo(bv string, db *gorm.DB) (BvList, error) {
@@ -61,6 +61,7 @@ func getVideoInfo(bv string, db *gorm.DB) (BvList, error) {
 
 // 全局更新数据
 func globalUpdate() {
+	log.Println("time cron")
 	var dsn = dsnRaw
 	dsn = strings.Replace(dsn, "username", usrName, -1)
 	dsn = strings.Replace(dsn, "password", psd, -1)
@@ -113,6 +114,7 @@ func updateBvlist(list *[]UpInfo, db *gorm.DB) {
 		}
 		result = append(result, BvItem...)
 	}
+	log.Println(result)
 	db.Save(&result)
 }
 
