@@ -45,9 +45,13 @@ type VideoStat struct {
 
 var usrName = "bili"
 var psd = "ttlIEEE"
-var addr = "121.40.170.27:3306"
+var addr = "localhost:3306"
 var dbName = "biliMonitor"
 var dsnRaw = "username:password@protocol(address)/dbname?charset=utf8mb4&parseTime=True"
+
+var day = 10
+var OneDay = 86400
+var maxTimeInterval = day * OneDay
 
 // 从数据库中获取视频的简要信息
 func getVideoInfo(bv string, db *gorm.DB) (BvList, error) {
@@ -71,7 +75,7 @@ func globalUpdate() {
 	db, _ := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	up, _ := getUPList(db)
 	updateBvlist(&up, db)
-	bvlist, _ := getAllBV(db)
+	bvlist := getBvListInTenDays(db)
 	updateBVStat(&bvlist, db)
 }
 
@@ -101,6 +105,13 @@ func delUp(list *[]uint, db *gorm.DB) {
 func getVideoStats(bv string, db *gorm.DB) []VideoStat {
 	var result []VideoStat
 	db.Where("bvid = ?", bv).Order("stat_time").Find(&result)
+	return result
+}
+
+func getBvListInTenDays(db *gorm.DB) []BvList {
+	var result []BvList
+	Interval := time.Now().Unix() - int64(maxTimeInterval)
+	db.Where("pubdate > ?", Interval).Find(&result)
 	return result
 }
 
@@ -285,7 +296,7 @@ func saveBV(list *[]BvList, db *gorm.DB) error {
 // 从数据库获取BV表
 func getAllBV(db *gorm.DB) ([]BvList, error) {
 	var Bvlist []BvList
-	db.Find(&Bvlist)
+	db.Order("pubdate").Find(&Bvlist) //按时间排列
 	return Bvlist, nil
 }
 
