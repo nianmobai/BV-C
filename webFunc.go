@@ -236,6 +236,7 @@ func getVideoDataHandle(w http.ResponseWriter, r *http.Request) {
 		data["data"].(map[string]interface{})["title"] = VideoInfo.Title
 		data["data"].(map[string]interface{})["pubdate"] = VideoInfo.Pubdate
 		data["data"].(map[string]interface{})["up_mid"] = VideoInfo.Mid
+		data["data"].(map[string]interface{})["up_name"] = VideoInfo.UpName
 	} else {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
