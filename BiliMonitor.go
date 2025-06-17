@@ -43,8 +43,8 @@ type VideoStat struct {
 	Online   int64  //在线观看人数
 }
 
-var usrName = "bili"
-var psd = "ttlIEEE"
+var usrName = "you name of database"
+var psd = "your password of database"
 var addr = "localhost:3306"
 var dbName = "biliMonitor"
 var dsnRaw = "username:password@protocol(address)/dbname?charset=utf8mb4&parseTime=True"
